@@ -26,15 +26,13 @@ class S3Client:
         print(f"Uploading {file_name} to S3")
 
         try:
-            self.s3.head_object(
-                Bucket=self.bucket_name, 
-                Key=file_name
-            )
-            print(f"File {file_name} already exists in bucket {self.bucket_name}.")
-        except:
             self.s3.upload_file(
                 Filename=file_path,
                 Bucket=self.bucket_name,
                 Key=file_name,
             )
+        except Exception as exc:
+            print(f"[ERROR] Failed to upload {file_name} to S3")
+            return
+
         return generate_S3_url(self.bucket_name, self.aws_region, file_name)

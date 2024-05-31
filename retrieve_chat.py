@@ -1,6 +1,8 @@
 import os
+import shutil
 import zipfile
 import argparse
+import csv
 from db import DBClient
 from utils import format_date
 from s3 import S3Client
@@ -19,54 +21,57 @@ def main():
         print("No messages available to pull.")
         return
 
-    # Create temporary directory for text files
-    temp_dir = 'temp_text_files'
+    # Create temporary directory for CSV files
+    temp_dir = 'temp_csv_files'
     os.makedirs(temp_dir, exist_ok=True)
 
-    txt_count = 0
+    csv_count = 0
     messages_count = 0
-    txt_filename = f'{txt_count}.txt'
-    txt_path = os.path.join(temp_dir, txt_filename)
+    csv_filename = f'{csv_count}.csv'
+    csv_path = os.path.join(temp_dir, csv_filename)
     zip_name = f'chatroom_{args.chatroom_id}.zip'
     zip_path = os.path.join(temp_dir, zip_name)
 
     with zipfile.ZipFile(zip_path, 'w') as zipf:
-        txtf = open(txt_path, 'w')
-        
+        csv_file = open(csv_path, 'w', newline='')
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(['Timestamp', 'Sender', 'Receiver', 'Message', 'Attachments'])
+
         for message in messages:
             _, chatroom_id, sender, receiver, message_text, attachment_urls, timestamp = message
-            txtf.write(f"{format_date(timestamp)}\n{sender} to {receiver}: {message_text}\n")
-            if attachment_urls:
-                txtf.write(f"Attachments:\n")
-                for url in attachment_urls:
-                    txtf.write(f"{url}\n")
+            attachments = ', '.join(attachment_urls) if attachment_urls else ''
+            csv_writer.writerow([format_date(timestamp), sender, receiver, message_text, attachments])
             
-            txtf.write(f"\n")
             messages_count += 1
 
-            # Create a new text file after processing 100 messages
+            # Create a new CSV file after processing 100 messages
             if messages_count % 100 == 0:
-                txtf.close()
-                zipf.write(txt_path, arcname=txt_filename)
-                os.remove(txt_path)
-                txt_count += 1
-                txt_filename = f'{txt_count}.txt'
-                txt_path = os.path.join(temp_dir, txt_filename)
-                txtf = open(txt_path, 'w')
+                csv_file.close()
+                zipf.write(csv_path, arcname=csv_filename)
+                os.remove(csv_path)
+                csv_count += 1
+                csv_filename = f'{csv_count}.csv'
+                csv_path = os.path.join(temp_dir, csv_filename)
+                csv_file = open(csv_path, 'w', newline='')
+                csv_writer = csv.writer(csv_file)
+                csv_writer.writerow(['Timestamp', 'Sender', 'Receiver', 'Message', 'Attachments'])
         
-        # Write the last text file to the ZIP file
+        # Write the last CSV file to the ZIP file
         if messages_count % 100 != 0:
-            txtf.close()
-            zipf.write(txt_path, arcname=txt_filename)
-            os.remove(txt_path)
+            csv_file.close()
+            zipf.write(csv_path, arcname=csv_filename)
+            os.remove(csv_path)
 
     # Upload the ZIP file to S3
     s3_url = s3_client.upload_to_s3(zip_name, zip_path)
+    print(f"{len(messages)} messages exported to {s3_url}")
 
     # Clean up temporary directory and zip file
-    os.remove(zip_path)
-    os.rmdir(temp_dir)
-    print(f"{len(messages)} messages exported to {s3_url}")
+    try:
+        os.remove(zip_path)
+        shutil.rmtree(temp_dir)
+    except Exception as exc:
+        print("Error while removing temporary files")
 
 if __name__ == "__main__":
     main()
